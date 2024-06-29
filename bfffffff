@@ -1,18 +1,18 @@
 GET /farejador*/_search
 {
-   "query": {
-                "bool": {
-                    "must": [
-                        {"match": {"cUserId": 32354320787}}
-                    ],
-                    "filter": [
-                        {"range": {"timestamp": {"gte": 2024-06-2T14:00:00, "lte": 2024-06-29T15:00:00}}}
-                    ]
-                }
-            },
-      "size":10
-  
+  "query": {
+    "bool": {
+      "must": [
+        { "match": { "cUserId": "12345678900" } }
+      ],
+      "filter": [
+        { "range": { "timestamp": { "gte": "2024-06-29T00:00:00", "lte": "2024-06-29T23:59:59", "format": "strict_date_optional_time" } } }
+      ]
+    }
+  },
+  "size": 10
 }
+
 
 {
   "error": {
