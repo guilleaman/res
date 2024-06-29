@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
-from flask_restful import Resource
+from flask_restful import Resource, Api
 from elasticsearch import Elasticsearch, TransportError
+from datetime import datetime, timedelta
 import os
 import urllib3
 import logging
@@ -9,36 +10,52 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 
-url_elasticsearch = os.getenv("ELASTICSEARCH_URL") 
+url_elasticsearch = os.getenv("ELASTICSEARCH_URL")
 token = os.getenv("ELASTICSEARCH_TOKEN")
 
 es = Elasticsearch(
     [url_elasticsearch],
-    headers={"Authorization": 'Basic %s' % token},
+    headers={"Authorization": f'Basic {token}'},
     verify_certs=False
 )
+
+logging.basicConfig(level=logging.INFO)
 
 class SearchResource(Resource):
     def get(self):
         cpf = request.args.get('cpf', '')
         if not cpf:
             return {'message': 'CPF is required'}, 400
-        
+
+        # Pega o timestamp atual e o intervalo dos últimos 10 minutos
+        end_time = datetime.now()
+        start_time = end_time - timedelta(minutes=10)
+
+        # Pega os timestamps da query string se existirem
+        start_timestamp = request.args.get('start_timestamp', start_time.isoformat())
+        end_timestamp = request.args.get('end_timestamp', end_time.isoformat())
+
         logging.info(f"Received CPF: {cpf}")
-        
+        logging.info(f"Searching logs from {start_timestamp} to {end_timestamp}")
+
         body = {
             "query": {
                 "bool": {
                     "must": [
                         {"match": {"cUserId": cpf}}
+                    ],
+                    "filter": [
+                        {"range": {"timestamp": {"gte": start_timestamp, "lte": end_timestamp}}}
                     ]
                 }
             },
             "size": 10000  # Ajuste esse valor conforme necessário para garantir que todos os logs sejam retornados
         }
-        
+
         try:
             res = es.search(index="farejador*", body=body)
+            logging.info(f"ElasticSearch response: {res}")
+
             hits = res['hits']['hits']
 
             response_data = [
@@ -49,7 +66,8 @@ class SearchResource(Resource):
                     "group": hit["_source"]["mServiceId"],
                     "component": hit["_source"]["mSourceId"],
                     "httpStatus": hit["_source"]["pHttpStatus"],
-                    "result": hit["_source"]["mOutcome"]
+                    "result": hit["_source"]["mOutcome"],
+                    "timestamp": hit["_source"]["timestamp"]
                 }
                 for hit in hits
             ]
@@ -64,226 +82,8 @@ class SearchResource(Resource):
             logging.error(f"Unexpected error: {str(e)}")
             return {'message': 'Internal server error', 'error': str(e)}, 500
 
+api = Api(app)
+api.add_resource(SearchResource, '/search')
+
 if __name__ == '__main__':
-    from flask_restful import Api
-    api = Api(app)
-    api.add_resource(SearchResource, '/search')
     app.run(debug=True)
-
-
-
-
-dashboard.components
-
-import { Component } from '@angular/core';
-import { Breakpoints, BreakpointObserver } from '@angular/cdk/layout';
-import { map, take } from 'rxjs/operators';
-import { Observable } from 'rxjs';
-import { FarejadorService } from './services/farejador.service';
-import { LogModel } from './models/log.model';
-import { Page, PageRequest } from './models/pagination';
-import { PageEvent } from '@angular/material/paginator';
-
-/**
- * Componente responsável pelas definições do Dashboard da aplicação
- */
-@Component({
-  selector: 'app-dashboard',
-  templateUrl: './dashboard.component.html',
-  styleUrls: ['./dashboard.component.scss'],
-})
-export class DashboardComponent {
-
-  colunas: string[] = ['usuario', 'correlationId', 'fase', 'sigla', 'component', 'operation', 'httpStatus', 'result', 'detalhe'];
-  page: Page<LogModel> = new Page([], 0);
-  pageEvent?: PageEvent;
-
-  public listaLogsFarejador: LogModel[] = [];
-  carregando = false;
-
-  constructor(private breakpointObserver: BreakpointObserver, private _farejador: FarejadorService) { }
-
-  ngOnInit() {
-    this.getLogFarejador();
-  }
-
-  getLogFarejador() {
-    this.carregando = true;
-    let queryAdicional = new Map<string, string>();
-
-    this._farejador.getLogFarejador(
-      new PageRequest(
-        {
-          pageNumber: this.pageEvent ? this.pageEvent.pageIndex : 0,
-          pageSize: this.pageEvent ? this.pageEvent.pageSize : 10
-        },
-        queryAdicional
-      )
-    ).pipe(
-      take(1)
-    )
-    .subscribe(
-      page => {
-        this.page = page;
-        this.carregando = false;
-      },
-      error => {
-        this.page = new Page([], 0);
-        this.carregando = false;
-      }
-    )
-  }
-
-}
-
-farejador.service:
-
-import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
-import { LogModel } from '../models/log.model';
-import { Page, QueryBuilder } from '../models/pagination';
-
-@Injectable({
-  providedIn: 'root'
-})
-export class FarejadorService {
-
-  private baseURL = 'http://localhost:5000/api';
-  constructor(private http: HttpClient) { }
-
-  /**
-   * Realiza a listagem de logs iniciais do farejador
-   * 
-   * 
-   */
-  /**
-   * Busca logs pelo CPF
-   * @param cpf CPF a ser buscado
-   * @returns Observable com os logs encontrados
-   */
-  getLogFarejador(cpf: string): Observable<Page<LogModel>> {
-    const headers = { 'Content-Type': 'application/json' };
-    return this.http
-      .get<LogModel[]>(`${this.baseURL}/search?cpf=${cpf}`, { observe: 'response' })
-      .pipe(
-        map(response => <Page<LogModel>>Page.fromResponse(response))
-      );
-  }
-
-}
-
-
-backend flask:
-from bvatomic import Resource, request
-from elasticsearch import Elasticsearch
-from datetime import datetime
-from collections import defaultdict
-from src.infrastructure.database.database_in_memory import farejador
-import os
-import requests
-from dotenv import load_dotenv
-import urllib3
-
-
-
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-load_dotenv()
-
-url_elasticsearch = os.getenv("ELASTICSEARCH_URL") 
-token = os.getenv("ELASTICSEARCH_TOKEN")
-
-es = Elasticsearch(
-    [url_elasticsearch],
-    headers={"Authorization": 'Basic %s' % token},
-    verify_certs=False
-)
-
-class ResourceFarejador(Resource):
-    def get(self):
-        return {"data": farejador["farejador"]}, 200
-
-
-
-class SearchResource(Resource):
-    def get(self):
-        data = request.get_json()
-        cpf = data.get('cpf', '')
-        hash_input = data.get('hash', '')
-        timestamp = data.get('timestamp', '')
-        current_page = int(data.get('page', 1))
-        hits_per_page = 10
-        start_from = (current_page - 1) * hits_per_page
-
-        if hash_input:
-            cpf = get_cpf_by_hash(hash_input)
-
-        body = {
-            "query": {
-                "bool": {
-                    "must": [
-                        {"match": {"cUserId": cpf}}
-                    ]
-                }
-            },
-            "from": start_from,
-            "size": hits_per_page
-        }
-
-        if timestamp:
-            body["query"]["bool"]["filter"] = {"range": {"timestamp": {"gte": timestamp, "lte": timestamp}}}
-
-        res = es.search(index="farejador*", body=body)
-        hits = res['hits']['hits']
-        total_hits = res['hits']['total']['value']
-
-        response_data = [
-            {
-                "user": hit["_source"]["cUserId"],
-                "correlationId": hit["_source"]["cCorrelationId"],
-                "fase": hit["_source"]["cFase"],
-                "group": hit["_source"]["mServiceId"],
-                "component": hit["_source"]["mSourceId"],
-                "httpStatus": hit["_source"]["pHttpStatus"],
-                "result": hit["_source"]["mOutcome"]
-            }
-            for hit in hits
-        ]
-
-        return {
-            "hits": response_data,
-            "total_hits": total_hits,
-            "current_page": current_page,
-            "hits_per_page": hits_per_page
-        }, 200
-
-# Function to get CPF by hash
-def get_cpf_by_hash(hash_value):
-    url_base = os.getenv("SWAGGER_URL")
-    url = url_base + hash_value
-    try:
-        response = requests.get(url, auth=(os.getenv("SWAGGER_USER"), os.getenv("SWAGGER_PASS")), verify=False)
-        response.raise_for_status()  # Gera uma exceção para códigos de status HTTP 4xx/5xx
-        service_response = response.json()
-        return service_response['cpfCnpj']
-    except requests.exceptions.RequestException as e:
-        print(f"Erro na requisição: {e}")
-        return None
-
-class TransformCPF(Resource):
-    def get(self, hash_value):
-        cpf = get_cpf_by_hash(hash_value)
-        if cpf:
-            return {'cpf': cpf}, 200
-        return {'message': 'CPF not found for given hash'}, 404
-
-rotas:
-from src.controller.app import bv_app
-from src.application.farejador import ResourceFarejador, SearchResource, TransformCPF
-
-def create_routes():
-    """Create routes"""
-    bv_app.create_route(SearchResource, "/search")
-    bv_app.create_route(TransformCPF, "/transform/<string:hash_value>")
