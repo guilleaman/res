@@ -2,6 +2,29 @@
 http://localhost:5000/search?cpf=<CPF_a_ser_buscado>&start_timestamp=<inicio>&end_timestamp=<fim>
 2023-06-29T14:00:00
 
+from bvatomic import Resource, request
+from elasticsearch import Elasticsearch
+from datetime import datetime
+from flask import Flask, request, jsonify
+from flask_restful import Resource
+from elasticsearch import Elasticsearch, TransportError
+import os
+import urllib3
+import logging
+import requests
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+app = Flask(__name__)
+
+url_elasticsearch = os.getenv("ELASTICSEARCH_URL") 
+token = os.getenv("ELASTICSEARCH_TOKEN")
+
+es = Elasticsearch(
+    [url_elasticsearch],
+    headers={"Authorization": 'Basic %s' % token},
+    verify_certs=False
+)
 
 from flask import Flask, request, jsonify
 from flask_restful import Resource, Api
@@ -34,7 +57,7 @@ class SearchResource(Resource):
 
         # Pega o timestamp atual e o intervalo dos últimos 10 minutos
         end_time = datetime.now()
-        start_time = end_time - timedelta(minutes=10)
+        start_time = end_time - timedelta(minutes=7200)
 
         # Pega os timestamps da query string se existirem
         start_timestamp = request.args.get('start_timestamp', start_time.isoformat())
@@ -54,7 +77,7 @@ class SearchResource(Resource):
                     ]
                 }
             },
-            "size": 10000  # Ajuste esse valor conforme necessário para garantir que todos os logs sejam retornados
+            "size": 1  # Ajuste esse valor conforme necessário para garantir que todos os logs sejam retornados
         }
 
         try:
@@ -87,8 +110,24 @@ class SearchResource(Resource):
             logging.error(f"Unexpected error: {str(e)}")
             return {'message': 'Internal server error', 'error': str(e)}, 500
 
-api = Api(app)
-api.add_resource(SearchResource, '/search')
 
-if __name__ == '__main__':
-    app.run(debug=True)
+####transformador de Hash
+        
+def get_cpf_by_hash(hash_value):
+    url_base = os.getenv("SWAGGER_URL")
+    url = url_base + hash_value
+    try:
+        response = requests.get(url, auth=(os.getenv("SWAGGER_USER"), os.getenv("SWAGGER_PASS")), verify=False)
+        response.raise_for_status()  # Gera uma exceção para códigos de status HTTP 4xx/5xx
+        service_response = response.json()
+        return service_response['cpfCnpj']
+    except requests.exceptions.RequestException as e:
+        print(f"Erro na requisição: {e}")
+        return None
+
+class TransformCPF(Resource):
+    def get(self, hash_value):
+        cpf = get_cpf_by_hash(hash_value)
+        if cpf:
+            return {'cpf': cpf}, 200
+        return {'message': 'CPF not found for given hash'}, 404
