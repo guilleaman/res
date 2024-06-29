@@ -1,4 +1,29 @@
+
+
+
+GET /farejadorv2-2024.06.29/_search
 {
+  "query": {
+    "bool": {
+      "must": [
+        { "match": { "cUserId.keyword": "<CPF_a_ser_buscado>" } }  # Usar o campo keyword para a busca exata
+      ],
+      "filter": [
+        { 
+          "range": {
+            "@timestamp": {
+              "gte": "2024-06-29T00:00:00Z",
+              "lte": "2024-06-29T23:59:59Z",
+              "format": "strict_date_optional_time"  # O formato é ISO8601 por padrão
+            }
+          }
+        }
+      ]
+    }
+  },
+  "size": 10  # Ajuste esse valor conforme necessário para garantir que todos os logs sejam retornados
+}
+  {
   "farejadorv2-2024.06.29": {
     "mappings": {
       "dynamic": "true",
