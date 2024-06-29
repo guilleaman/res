@@ -1,0 +1,191 @@
+import os
+import requests
+from flask import Flask, request, jsonify
+from flask_restful import Resource, Api
+from elasticsearch import Elasticsearch, TransportError
+from datetime import datetime, timedelta
+import urllib3
+import logging
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+app = Flask(__name__)
+api = Api(app)
+
+url_elasticsearch = os.getenv("ELASTICSEARCH_URL")
+token = os.getenv("ELASTICSEARCH_TOKEN")
+
+es = Elasticsearch(
+    [url_elasticsearch],
+    headers={"Authorization": f'Basic {token}'},
+    verify_certs=False
+)
+
+logging.basicConfig(level=logging.INFO)
+
+# Função para transformar hash em CPF usando o Swagger
+def get_cpf_by_hash(hash_value):
+    url_base = os.getenv("SWAGGER_URL")
+    url = url_base + hash_value
+    try:
+        response = requests.get(url, auth=(os.getenv("SWAGGER_USER"), os.getenv("SWAGGER_PASS")), verify=False)
+        response.raise_for_status()  # Gera uma exceção para códigos de status HTTP 4xx/5xx
+        service_response = response.json()
+        return service_response['cpfCnpj']
+    except requests.exceptions.RequestException as e:
+        print(f"Erro na requisição: {e}")
+        return None
+
+# Endpoint para transformar hash em CPF e buscar logs
+class TransformAndSearch(Resource):
+    def get(self, hash_value):
+        cpf = get_cpf_by_hash(hash_value)
+        if not cpf:
+            return {'message': 'CPF not found for given hash'}, 404
+
+        # Pega os timestamps da query string, ou usa valores default para caso não sejam passados
+        start_timestamp = request.args.get('start_timestamp', (datetime.now() - timedelta(hours=2)).isoformat())
+        end_timestamp = request.args.get('end_timestamp', datetime.now().isoformat())
+
+        try:
+            # Ajusta os timestamps para o formato ISO8601
+            start_timestamp = datetime.fromisoformat(start_timestamp).strftime('%Y-%m-%dT%H:%M:%S') + 'Z'
+            end_timestamp = datetime.fromisoformat(end_timestamp).strftime('%Y-%m-%dT%H:%M:%S') + 'Z'
+        except ValueError:
+            return {'message': 'Invalid date format'}, 400
+
+        logging.info(f"Received CPF: {cpf}")
+        logging.info(f"Searching logs from {start_timestamp} to {end_timestamp}")
+
+        body = {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"match": {"cUserId.keyword": cpf}}  # Usar o campo keyword para a busca exata
+                    ],
+                    "filter": [
+                        {
+                            "range": {
+                                "@timestamp": {
+                                    "gte": start_timestamp,
+                                    "lte": end_timestamp,
+                                    "format": "strict_date_optional_time"  # O formato é ISO8601 por padrão
+                                }
+                            }
+                        }
+                    ]
+                }
+            },
+            "size": 10  # Ajuste esse valor conforme necessário para garantir que todos os logs sejam retornados
+        }
+
+        try:
+            res = es.search(index="farejadorv2-2024.06.29", body=body, request_timeout=30)  # Aumenta o tempo de espera se necessário
+            logging.info(f"ElasticSearch response: {res}")
+
+            hits = res['hits']['hits']
+
+            response_data = [
+                {
+                    "user": hit["_source"].get("cUserId", ""),
+                    "correlationId": hit["_source"].get("cCorrelationId", ""),
+                    "fase": hit["_source"].get("cFase", ""),
+                    "group": hit["_source"].get("mServiceId", ""),
+                    "component": hit["_source"].get("mSourceId", ""),
+                    "httpStatus": hit["_source"].get("pHttpStatus", ""),
+                    "result": hit["_source"].get("mOutcome", ""),
+                    "timestamp": hit["_source"].get("@timestamp", "")
+                }
+                for hit in hits
+            ]
+
+            logging.info(f"Response data: {response_data}")
+
+            return jsonify(response_data)
+        except TransportError as e:
+            logging.error(f"ElasticSearch TransportError: {e.info}")
+            return {'message': 'ElasticSearch error', 'error': e.info}, 500
+        except Exception as e:
+            logging.error(f"Unexpected error: {str(e)}")
+            return {'message': 'Internal server error', 'error': str(e)}, 500
+
+# Endpoint para buscar logs por CPF diretamente
+class SearchResource(Resource):
+    def get(self):
+        cpf = request.args.get('cpf', '')
+
+        if not cpf:
+            return {'message': 'CPF is required'}, 400
+
+        # Pega os timestamps da query string, ou usa valores default para caso não sejam passados
+        start_timestamp = request.args.get('start_timestamp', (datetime.now() - timedelta(hours=2)).isoformat())
+        end_timestamp = request.args.get('end_timestamp', datetime.now().isoformat())
+
+        try:
+            # Ajusta os timestamps para o formato ISO8601
+            start_timestamp = datetime.fromisoformat(start_timestamp).strftime('%Y-%m-%dT%H:%M:%S') + 'Z'
+            end_timestamp = datetime.fromisoformat(end_timestamp).strftime('%Y-%m-%dT%H:%M:%S') + 'Z'
+        except ValueError:
+            return {'message': 'Invalid date format'}, 400
+
+        logging.info(f"Received CPF: {cpf}")
+        logging.info(f"Searching logs from {start_timestamp} to {end_timestamp}")
+
+        body = {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"match": {"cUserId.keyword": cpf}}  # Usar o campo keyword para a busca exata
+                    ],
+                    "filter": [
+                        {
+                            "range": {
+                                "@timestamp": {
+                                    "gte": start_timestamp,
+                                    "lte": end_timestamp,
+                                    "format": "strict_date_optional_time"  # O formato é ISO8601 por padrão
+                                }
+                            }
+                        }
+                    ]
+                }
+            },
+            "size": 10  # Ajuste esse valor conforme necessário para garantir que todos os logs sejam retornados
+        }
+
+        try:
+            res = es.search(index="farejadorv2-2024.06.29", body=body, request_timeout=30)  # Aumenta o tempo de espera se necessário
+            logging.info(f"ElasticSearch response: {res}")
+
+            hits = res['hits']['hits']
+
+            response_data = [
+                {
+                    "user": hit["_source"].get("cUserId", ""),
+                    "correlationId": hit["_source"].get("cCorrelationId", ""),
+                    "fase": hit["_source"].get("cFase", ""),
+                    "group": hit["_source"].get("mServiceId", ""),
+                    "component": hit["_source"].get("mSourceId", ""),
+                    "httpStatus": hit["_source"].get("pHttpStatus", ""),
+                    "result": hit["_source"].get("mOutcome", ""),
+                    "timestamp": hit["_source"].get("@timestamp", "")
+                }
+                for hit in hits
+            ]
+
+            logging.info(f"Response data: {response_data}")
+
+            return jsonify(response_data)
+        except TransportError as e:
+            logging.error(f"ElasticSearch TransportError: {e.info}")
+            return {'message': 'ElasticSearch error', 'error': e.info}, 500
+        except Exception as e:
+            logging.error(f"Unexpected error: {str(e)}")
+            return {'message': 'Internal server error', 'error': str(e)}, 500
+
+# Adiciona os recursos à API
+api.add_resource(SearchResource, '/search')
+api.add_resource(TransformAndSearch, '/transform/<string:hash_value>')
+
+if __name__ == '__main__':
+    app.run(debug=True)
