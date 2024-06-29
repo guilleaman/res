@@ -2,11 +2,10 @@
 http://localhost:5000/search?cpf=<CPF_a_ser_buscado>&start_timestamp=<inicio>&end_timestamp=<fim>
 2023-06-29T14:00:00
 
-
 from flask import Flask, request, jsonify
 from flask_restful import Resource, Api
 from elasticsearch import Elasticsearch, TransportError
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import urllib3
 import logging
@@ -40,8 +39,8 @@ class SearchResource(Resource):
 
         try:
             # Parse the timestamps to ensure they are in the correct format
-            start_timestamp = datetime.fromisoformat(start_timestamp).isoformat()
-            end_timestamp = datetime.fromisoformat(end_timestamp).isoformat()
+            start_timestamp = datetime.fromisoformat(start_timestamp).strftime('%Y-%m-%dT%H:%M:%S')
+            end_timestamp = datetime.fromisoformat(end_timestamp).strftime('%Y-%m-%dT%H:%M:%S')
         except ValueError:
             return {'message': 'Invalid date format'}, 400
 
@@ -55,7 +54,7 @@ class SearchResource(Resource):
                         {"match": {"cUserId": cpf}}
                     ],
                     "filter": [
-                        {"range": {"timestamp": {"gte": start_timestamp, "lte": end_timestamp}}}
+                        {"range": {"timestamp": {"gte": start_timestamp, "lte": end_timestamp, "format": "strict_date_optional_time"}}}
                     ]
                 }
             },
@@ -117,4 +116,3 @@ api.add_resource(TransformCPF, '/transform/<string:hash_value>')
 
 if __name__ == '__main__':
     app.run(debug=True)
-
