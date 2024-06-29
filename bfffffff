@@ -1,3 +1,78 @@
+from flask import Flask, request, jsonify
+from flask_restful import Resource
+from elasticsearch import Elasticsearch, TransportError
+import os
+import urllib3
+import logging
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+app = Flask(__name__)
+
+url_elasticsearch = os.getenv("ELASTICSEARCH_URL") 
+token = os.getenv("ELASTICSEARCH_TOKEN")
+
+es = Elasticsearch(
+    [url_elasticsearch],
+    headers={"Authorization": 'Basic %s' % token},
+    verify_certs=False
+)
+
+class SearchResource(Resource):
+    def get(self):
+        cpf = request.args.get('cpf', '')
+        if not cpf:
+            return {'message': 'CPF is required'}, 400
+        
+        logging.info(f"Received CPF: {cpf}")
+        
+        body = {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"match": {"cUserId": cpf}}
+                    ]
+                }
+            },
+            "size": 10000  # Ajuste esse valor conforme necessário para garantir que todos os logs sejam retornados
+        }
+        
+        try:
+            res = es.search(index="farejador*", body=body)
+            hits = res['hits']['hits']
+
+            response_data = [
+                {
+                    "user": hit["_source"]["cUserId"],
+                    "correlationId": hit["_source"]["cCorrelationId"],
+                    "fase": hit["_source"]["cFase"],
+                    "group": hit["_source"]["mServiceId"],
+                    "component": hit["_source"]["mSourceId"],
+                    "httpStatus": hit["_source"]["pHttpStatus"],
+                    "result": hit["_source"]["mOutcome"]
+                }
+                for hit in hits
+            ]
+
+            logging.info(f"Response data: {response_data}")
+
+            return jsonify(response_data)
+        except TransportError as e:
+            logging.error(f"ElasticSearch TransportError: {e.info}")
+            return {'message': 'ElasticSearch error', 'error': e.info}, 500
+        except Exception as e:
+            logging.error(f"Unexpected error: {str(e)}")
+            return {'message': 'Internal server error', 'error': str(e)}, 500
+
+if __name__ == '__main__':
+    from flask_restful import Api
+    api = Api(app)
+    api.add_resource(SearchResource, '/search')
+    app.run(debug=True)
+
+
+
+
 dashboard.components
 
 import { Component } from '@angular/core';
