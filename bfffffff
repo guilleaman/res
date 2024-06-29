@@ -14,6 +14,31 @@ GET /farejador*/_search
   
 }
 
+{
+  "error": {
+    "root_cause": [
+      {
+        "type": "x_content_parse_exception",
+        "reason": """[8:62] Unexpected character ('-' (code 45)): was expecting comma to separate Object entries
+ at [Source: (org.elasticsearch.common.io.stream.ByteBufferStreamInput); line: 8, column: 62]"""
+      }
+    ],
+    "type": "x_content_parse_exception",
+    "reason": "[8:57] [bool] failed to parse field [filter]",
+    "caused_by": {
+      "type": "x_content_parse_exception",
+      "reason": """[8:62] Unexpected character ('-' (code 45)): was expecting comma to separate Object entries
+ at [Source: (org.elasticsearch.common.io.stream.ByteBufferStreamInput); line: 8, column: 62]""",
+      "caused_by": {
+        "type": "json_parse_exception",
+        "reason": """Unexpected character ('-' (code 45)): was expecting comma to separate Object entries
+ at [Source: (org.elasticsearch.common.io.stream.ByteBufferStreamInput); line: 8, column: 62]"""
+      }
+    }
+  },
+  "status": 400
+}
+
 
 http://localhost:5000/search?cpf=<CPF_a_ser_buscado>&start_timestamp=<inicio>&end_timestamp=<fim>
 2023-06-29T14:00:00
