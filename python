@@ -1,0 +1,40 @@
+import pandas as pd
+import os
+
+def buscar_incidentes(csv_file, palavras_chave):
+    # Ler o arquivo CSV
+    df = pd.read_csv(csv_file)
+    
+    # Verificar se o campo "incident number" existe
+    if 'incident number' not in df.columns:
+        raise ValueError("O campo 'incident number' não foi encontrado no CSV")
+    
+    # Combinar todas as colunas em uma única string por linha, exceto a coluna "incident number"
+    df['combined'] = df.drop(columns=['incident number']).apply(lambda row: ' '.join(row.values.astype(str)), axis=1)
+    
+    # Procurar pelas palavras-chave
+    resultados = df[df['combined'].str.contains('|'.join(palavras_chave), case=False, na=False)]
+    
+    # Obter os números dos incidentes correspondentes
+    incidentes = resultados['incident number'].unique()
+    
+    return incidentes
+
+# Nome do arquivo CSV
+csv_filename = 'seu_arquivo.csv'
+downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
+csv_file = os.path.join(downloads_path, csv_filename)
+
+# Lista de palavras-chave
+palavras_chave = ['restart', 'pod']
+
+# Buscar incidentes no CSV
+incidentes = buscar_incidentes(csv_file, palavras_chave)
+
+# Exibir resultados
+if len(incidentes) > 0:
+    print("Números dos incidentes contendo as palavras-chave:")
+    for incidente in incidentes:
+        print(incidente)
+else:
+    print("Nenhuma ocorrência encontrada.")
