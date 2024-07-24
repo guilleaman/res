@@ -1,3 +1,31 @@
+
+{
+  "type": "object",
+  "properties": {
+    "evalMatches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "number" },
+          "metric": { "type": "string" },
+          "tags": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          }
+        }
+      }
+    },
+    "message": { "type": "string" },
+    "ruleId": { "type": "number" },
+    "ruleName": { "type": "string" },
+    "state": { "type": "string" },
+    "title": { "type": "string" }
+  }
+}
+
+
+
 import pandas as pd
 import os
 
